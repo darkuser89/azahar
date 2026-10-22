@@ -271,6 +271,19 @@ public:
     virtual ~RenderWidget() = default;
 };
 
+#ifdef ENABLE_METAL
+class MetalRenderWidget final : public RenderWidget {
+public:
+    explicit MetalRenderWidget(GRenderWindow* parent) : RenderWidget(parent) {
+        setAttribute(Qt::WA_NativeWindow);
+        setAttribute(Qt::WA_PaintOnScreen);
+        setAttribute(Qt::WA_NoSystemBackground);
+        windowHandle()->setSurfaceType(QWindow::MetalSurface);
+    }
+    QPaintEngine* paintEngine() const override { return nullptr; }
+};
+#endif
+
 #ifdef ENABLE_OPENGL
 class OpenGLRenderWidget : public RenderWidget {
 public:
@@ -652,6 +665,11 @@ bool GRenderWindow::InitRenderTarget() {
 
     const auto graphics_api = Settings::GetWorkingGraphicsAPI();
     switch (graphics_api) {
+#ifdef ENABLE_METAL
+    case Settings::GraphicsAPI::Metal:
+        InitializeMetal();
+        break;
+#endif
 #ifdef ENABLE_SOFTWARE_RENDERER
     case Settings::GraphicsAPI::Software:
         InitializeSoftware();
@@ -673,7 +691,9 @@ bool GRenderWindow::InitRenderTarget() {
         LOG_CRITICAL(Frontend,
                      "Unknown or unsupported graphics API {}, falling back to available default",
                      graphics_api);
-#ifdef ENABLE_OPENGL
+#ifdef ENABLE_METAL
+        InitializeMetal();
+#elif defined(ENABLE_OPENGL)
         if (!InitializeOpenGL() || !LoadOpenGL()) {
             return false;
         }
@@ -804,6 +824,14 @@ bool GRenderWindow::LoadOpenGL() {
     }
 
     return true;
+}
+#endif
+
+#ifdef ENABLE_METAL
+void GRenderWindow::InitializeMetal() {
+    child_widget = new MetalRenderWidget(this);
+    child_widget->windowHandle()->create();
+    main_context = std::make_unique<DummyContext>();
 }
 #endif
 

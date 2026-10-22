@@ -36,6 +36,8 @@ std::string_view GetGraphicsAPIName(GraphicsAPI api) {
         return "OpenGL";
     case GraphicsAPI::Vulkan:
         return "Vulkan";
+    case GraphicsAPI::Metal:
+        return "Metal 4";
     default:
         return "Invalid";
     }
@@ -257,7 +259,32 @@ Settings::GraphicsAPI GetWorkingGraphicsAPI() {
         graphics_api = Settings::GraphicsAPI::Vulkan;
     }
 #endif
-    return graphics_api;
+    switch (graphics_api) {
+#ifdef ENABLE_METAL
+    case GraphicsAPI::Metal:
+#endif
+#ifdef ENABLE_VULKAN
+    case GraphicsAPI::Vulkan:
+#endif
+#ifdef ENABLE_OPENGL
+    case GraphicsAPI::OpenGL:
+#endif
+#ifdef ENABLE_SOFTWARE_RENDERER
+    case GraphicsAPI::Software:
+#endif
+        return graphics_api;
+    default:
+        break;
+    }
+#ifdef ENABLE_METAL
+    return GraphicsAPI::Metal;
+#elif defined(ENABLE_OPENGL)
+    return GraphicsAPI::OpenGL;
+#elif defined(ENABLE_VULKAN)
+    return GraphicsAPI::Vulkan;
+#else
+    return GraphicsAPI::Software;
+#endif
 }
 
 void LoadProfile(int index) {

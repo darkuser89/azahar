@@ -23,6 +23,7 @@ enum class GraphicsAPI {
     Software = 0,
     OpenGL = 1,
     Vulkan = 2,
+    Metal = 3,
 };
 
 enum class InitClock : u32 {
@@ -513,6 +514,10 @@ struct Values {
 
     // Renderer
     // clang-format off
+#if defined(ENABLE_METAL)
+    SwitchableSetting<GraphicsAPI, true> graphics_api{
+        GraphicsAPI::Metal, GraphicsAPI::Software, GraphicsAPI::Metal, Keys::graphics_api};
+#else
     SwitchableSetting<GraphicsAPI, true> graphics_api{
 #if defined(ANDROID) && defined(ENABLE_VULKAN) // Prefer Vulkan on Android, OpenGL on everything else
         GraphicsAPI::Vulkan,
@@ -527,6 +532,7 @@ struct Values {
 #error "At least one renderer must be enabled."
 #endif
         GraphicsAPI::Software, GraphicsAPI::Vulkan, Keys::graphics_api};
+#endif
     // clang-format on
     SwitchableSetting<u32> physical_device{0, Keys::physical_device};
     Setting<bool> use_gles{false, Keys::use_gles};

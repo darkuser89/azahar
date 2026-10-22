@@ -5,6 +5,9 @@
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "video_core/gpu.h"
+#ifdef ENABLE_METAL
+#include "video_core/renderer_metal/renderer_metal.h"
+#endif
 #ifdef ENABLE_OPENGL
 #include "video_core/renderer_opengl/renderer_opengl.h"
 #endif
@@ -27,6 +30,10 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
                                              Pica::PicaCore& pica, Core::System& system) {
     const auto graphics_api = Settings::GetWorkingGraphicsAPI();
     switch (graphics_api) {
+#ifdef ENABLE_METAL
+    case Settings::GraphicsAPI::Metal:
+        return std::make_unique<Metal::RendererMetal>(system, pica, emu_window, secondary_window);
+#endif
 #ifdef ENABLE_SOFTWARE_RENDERER
     case Settings::GraphicsAPI::Software:
         return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window);
@@ -49,7 +56,9 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
         LOG_CRITICAL(Render,
                      "Unknown or unsupported graphics API {}, falling back to available default",
                      graphics_api);
-#ifdef ENABLE_OPENGL
+#ifdef ENABLE_METAL
+        return std::make_unique<Metal::RendererMetal>(system, pica, emu_window, secondary_window);
+#elif defined(ENABLE_OPENGL)
         return std::make_unique<OpenGL::RendererOpenGL>(system, pica, emu_window, secondary_window);
 #elif ENABLE_VULKAN
         return std::make_unique<Vulkan::RendererVulkan>(system, pica, emu_window, secondary_window);

@@ -100,6 +100,13 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     video_core.h
 )
 
+if(ENABLE_METAL)
+    add_subdirectory(renderer_metal)
+    target_link_libraries(video_core PRIVATE azahar_metal4)
+    # The factory sees Objective-C Metal handles; all other shared sources remain C++.
+    set_source_files_properties(video_core.cpp PROPERTIES LANGUAGE OBJCXX COMPILE_OPTIONS "-fobjc-arc")
+endif()
+
 if (ENABLE_SOFTWARE_RENDERER)
     target_sources(video_core PRIVATE
         renderer_software/renderer_software.cpp

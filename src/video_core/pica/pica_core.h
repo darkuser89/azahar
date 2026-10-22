@@ -15,6 +15,12 @@
 #include "video_core/pica/regs_lcd.h"
 #include "video_core/pica/shader_setup.h"
 #include "video_core/pica/shader_unit.h"
+#ifdef ENABLE_METAL
+#include <vector>
+#include <boost/serialization/binary_object.hpp>
+#include <boost/serialization/version.hpp>
+#include "video_core/renderer_metal/mtl_state.h"
+#endif
 
 namespace Memory {
 class MemorySystem;
@@ -373,8 +379,23 @@ private:
     friend class boost::serialization::access;
     template <class Archive>
     void serialize(Archive& ar, const u32 file_version) {
+#ifdef ENABLE_METAL
+        if (file_version > 3) RejectUnsupportedMetalState(file_version);
+        bool native_state = UsesMetalRasterizer();
+        if (file_version >= 3) {
+            ar & native_state;
+        } else if (Archive::is_loading::value) {
+            native_state = file_version != 0;
+        }
+        if (native_state != UsesMetalRasterizer()) {
+            throw std::runtime_error("Savestate renderer mismatch: select the renderer used to save it");
+        }
+#endif
         ar & regs_lcd;
         ar & regs.reg_array;
+#ifdef ENABLE_METAL
+        if (!native_state)
+#endif
         ar & gs_unit;
         ar & vs_setup;
         ar & gs_setup;
@@ -384,10 +405,31 @@ private:
         ar & input_default_attributes;
         ar & immediate;
         ar & delay_generator;
-        ar & geometry_pipeline;
-        ar & primitive_assembler;
+#ifdef ENABLE_METAL
+        if (!native_state) {
+#endif
+            ar & geometry_pipeline;
+            ar & primitive_assembler;
+#ifdef ENABLE_METAL
+        }
+#endif
         ar & cmd_list;
+#ifdef ENABLE_METAL
+        if (native_state && Archive::is_loading::value && file_version==1) {
+            std::array<u8,Metal::LegacyStateBytes> metal_state{};
+            ar & boost::serialization::make_binary_object(metal_state.data(),metal_state.size());
+            LoadMetalRasterizerState({metal_state.begin(),metal_state.end()});
+        } else if (native_state) {
+            std::array<u8,Metal::StateArchiveBytes> metal_state{};
+            if (!Archive::is_loading::value) CopyMetalRasterizerState(metal_state);
+            ar & boost::serialization::make_binary_object(metal_state.data(),metal_state.size());
+            if (Archive::is_loading::value) LoadMetalRasterizerState({metal_state.begin(),metal_state.end()});
+        }
+#endif
         if (Archive::is_loading::value) {
+#ifdef ENABLE_METAL
+            RestoreCommandListPointer();
+#endif
             dirty_regs.SetAllDirty();
         }
     }
@@ -404,7 +446,17 @@ public:
 
 private:
     Memory::MemorySystem& memory;
+#ifdef ENABLE_METAL
+    VideoCore::RasterizerInterface* rasterizer{};
+    bool UsesMetalRasterizer() const;
+    void RestoreCommandListPointer();
+    void CopyMetalRasterizerState(std::array<u8,Metal::StateArchiveBytes>& state);
+    void NotifyMetalGSUniformWrite(u32 first,u32 count,u16 bool_mask,u8 integer_mask);
+    void LoadMetalRasterizerState(const std::vector<u8>& state);
+    static void RejectUnsupportedMetalState(u32 version);
+#else
     VideoCore::RasterizerInterface* rasterizer;
+#endif
     std::shared_ptr<DebugContext> debug_context;
     Service::GSP::InterruptHandler signal_interrupt;
     GeometryPipeline geometry_pipeline;
@@ -416,3 +468,6 @@ private:
 #define GPU_REG_INDEX(field_name) (offsetof(Pica::PicaCore::Regs, field_name) / sizeof(u32))
 
 } // namespace Pica
+#ifdef ENABLE_METAL
+BOOST_CLASS_VERSION(Pica::PicaCore,3)
+#endif

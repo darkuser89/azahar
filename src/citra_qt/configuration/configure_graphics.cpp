@@ -16,6 +16,10 @@ ConfigureGraphics::ConfigureGraphics(QString gl_renderer, std::span<const QStrin
                                      bool is_powered_on, QWidget* parent)
     : QWidget(parent), ui(std::make_unique<Ui::ConfigureGraphics>()) {
     ui->setupUi(this);
+#ifdef ENABLE_METAL
+    // Keep the persisted enum indices shared with the renderer status button.
+    ui->graphics_api_combo->addItem(tr("Metal 4"));
+#endif
 
     SetupPerGameUI();
 
@@ -34,15 +38,16 @@ ConfigureGraphics::ConfigureGraphics(QString gl_renderer, std::span<const QStrin
 
     auto graphics_api_combo_model =
         qobject_cast<QStandardItemModel*>(ui->graphics_api_combo->model());
+    const int api_offset = Settings::IsConfiguringGlobal() ? 0 : ConfigurationShared::USE_GLOBAL_OFFSET;
 #ifndef ENABLE_SOFTWARE_RENDERER
     const auto software_item =
-        graphics_api_combo_model->item(static_cast<u32>(Settings::GraphicsAPI::Software));
+        graphics_api_combo_model->item(api_offset + static_cast<u32>(Settings::GraphicsAPI::Software));
     software_item->setFlags(software_item->flags() & ~Qt::ItemIsEnabled);
 #endif
 
 #ifndef ENABLE_OPENGL
     const auto opengl_item =
-        graphics_api_combo_model->item(static_cast<u32>(Settings::GraphicsAPI::OpenGL));
+        graphics_api_combo_model->item(api_offset + static_cast<u32>(Settings::GraphicsAPI::OpenGL));
     opengl_item->setFlags(opengl_item->flags() & ~Qt::ItemIsEnabled);
 #else
     ui->opengl_renderer_name_label->setText(gl_renderer);
@@ -50,12 +55,12 @@ ConfigureGraphics::ConfigureGraphics(QString gl_renderer, std::span<const QStrin
 
 #ifndef ENABLE_VULKAN
     const auto vulkan_item =
-        graphics_api_combo_model->item(static_cast<u32>(Settings::GraphicsAPI::Vulkan));
+        graphics_api_combo_model->item(api_offset + static_cast<u32>(Settings::GraphicsAPI::Vulkan));
     vulkan_item->setFlags(vulkan_item->flags() & ~Qt::ItemIsEnabled);
 #else
     if (physical_devices.empty()) {
         const auto vulkan_item =
-            graphics_api_combo_model->item(static_cast<u32>(Settings::GraphicsAPI::Vulkan));
+            graphics_api_combo_model->item(api_offset + static_cast<u32>(Settings::GraphicsAPI::Vulkan));
         vulkan_item->setFlags(vulkan_item->flags() & ~Qt::ItemIsEnabled);
 
         ui->physical_device_combo->setVisible(false);
@@ -141,6 +146,12 @@ void ConfigureGraphics::SetConfiguration() {
     }
 
     ui->toggle_hw_shader->setChecked(Settings::values.use_hw_shader.GetValue());
+#ifdef ENABLE_METAL
+    if (Settings::GetWorkingGraphicsAPI() == Settings::GraphicsAPI::Metal) {
+        ui->toggle_hw_shader->setChecked(true);
+        ui->toggle_hw_shader->setEnabled(false);
+    }
+#endif
     ui->toggle_accurate_mul->setChecked(Settings::values.shaders_accurate_mul.GetValue());
     ui->toggle_disk_shader_cache->setChecked(Settings::values.use_disk_shader_cache.GetValue());
     ui->toggle_vsync->setChecked(Settings::values.use_vsync.GetValue());
@@ -298,4 +309,9 @@ void ConfigureGraphics::SetPhysicalDeviceComboVisibility(int index) {
     ui->spirv_shader_gen->setVisible(effective_api == Settings::GraphicsAPI::Vulkan);
     ui->disable_spirv_optimizer->setVisible(effective_api == Settings::GraphicsAPI::Vulkan);
     ui->opengl_renderer_group->setVisible(effective_api == Settings::GraphicsAPI::OpenGL);
+#ifdef ENABLE_METAL
+    const bool is_metal = effective_api == Settings::GraphicsAPI::Metal;
+    ui->toggle_hw_shader->setEnabled(!is_metal);
+    if (is_metal) ui->toggle_hw_shader->setChecked(true);
+#endif
 }

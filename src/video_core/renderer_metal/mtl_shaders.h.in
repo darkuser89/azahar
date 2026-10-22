@@ -1,0 +1,22 @@
+// Copyright 2026 Azahar Emulator Project
+// Licensed under GPLv2 or any later version
+
+#pragma once
+
+namespace Metal {
+inline constexpr char GasShaderSource[] = R"MTLG(@METAL4_GAS_SOURCE@)MTLG";
+inline constexpr char FilterBicubicSource[]=R"MTLF(@METAL4_FILTER_BICUBIC@)MTLF";
+inline constexpr char FilterScaleForceSource[]=R"MTLF(@METAL4_FILTER_SCALE_FORCE@)MTLF";
+inline constexpr char FilterXbrzSource[]=R"MTLF(@METAL4_FILTER_XBRZ_FREESCALE@)MTLF";
+inline constexpr char FilterMmpxSource[]=R"MTLF(@METAL4_FILTER_MMPX@)MTLF";
+inline constexpr char FilterXGradientSource[]=R"MTLF(@METAL4_FILTER_X_GRADIENT@)MTLF";
+inline constexpr char FilterYGradientSource[]=R"MTLF(@METAL4_FILTER_Y_GRADIENT@)MTLF";
+inline constexpr char FilterRefineSource[]=R"MTLF(@METAL4_FILTER_REFINE@)MTLF";
+inline constexpr const char* GuestCodecShaderSource = R"MTL(@METAL4_GUEST_CODEC_SOURCE@)MTL";
+inline constexpr char GeometryProgramShaderSource[] = R"MTL(@METAL4_GEOMETRY_PROGRAM_SOURCE@)MTL";
+inline constexpr const char* ShaderMachineSource = R"MTL(@METAL4_SHADER_MACHINE_SOURCE@)MTL";
+inline constexpr char PresentShaderSource[] = R"metal4(@METAL4_PRESENT_SOURCE@)metal4";
+inline constexpr char GeometryShaderSource[] = R"metal4(@METAL4_GEOMETRY_SOURCE@)metal4";
+inline constexpr char FormatConversionShaderSource[] = R"metal4(@METAL4_FORMAT_CONVERSION_SOURCE@)metal4";
+inline constexpr char VertexFetchShaderSource[] = R"metal4(@METAL4_VERTEX_FETCH_SOURCE@)metal4";
+} // namespace Metal

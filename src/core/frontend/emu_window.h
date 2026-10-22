@@ -7,6 +7,9 @@
 #include <memory>
 #include <tuple>
 #include <utility>
+#ifdef ENABLE_METAL
+#include <mutex>
+#endif
 
 #include "common/common_types.h"
 #include "core/3ds.h"
@@ -246,6 +249,12 @@ public:
     const Layout::FramebufferLayout& GetFramebufferLayout() const {
         return framebuffer_layout;
     }
+#ifdef ENABLE_METAL
+    Layout::FramebufferLayout GetMetalFramebufferLayoutSnapshot() const {
+        std::scoped_lock lock{metal_layout_mutex};
+        return framebuffer_layout;
+    }
+#endif
 
     /**
      * Convenience method to update the current frame layout
@@ -315,6 +324,9 @@ protected:
      * @note EmuWindow implementations will usually use this in window resize event handlers.
      */
     void NotifyFramebufferLayoutChanged(const Layout::FramebufferLayout& layout) {
+#ifdef ENABLE_METAL
+        std::scoped_lock lock{metal_layout_mutex};
+#endif
         framebuffer_layout = layout;
     }
 
@@ -336,6 +348,9 @@ private:
     void CreateTouchState();
 
     Layout::FramebufferLayout framebuffer_layout; ///< Current framebuffer layout
+#ifdef ENABLE_METAL
+    mutable std::mutex metal_layout_mutex;
+#endif
 
     WindowConfig config{};        ///< Internal configuration (changes pending for being applied in
                                   /// ProcessConfigurationChanges)

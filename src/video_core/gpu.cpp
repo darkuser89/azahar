@@ -203,6 +203,11 @@ Result GPU::Execute(const Service::GSP::Command& command) {
 
         // Trigger processing of the command list
         SubmitCmdList(0);
+#ifdef ENABLE_METAL
+        if ((params.flags & 1u) && impl->rasterizer->IsMetalRasterizer()) {
+            impl->rasterizer->UpdateMetalGasAccumulatorMaximum();
+        }
+#endif
         break;
     }
     case CommandId::MemoryFill: {
@@ -367,6 +372,11 @@ u32 GPU::ReadReg(VAddr addr) {
         const u32 index = offset / sizeof(u32);
         ASSERT(addr % sizeof(u32) == 0);
         ASSERT(index < Pica::PicaCore::Regs::NUM_REGS);
+#ifdef ENABLE_METAL
+        if (index == GPU_REG_INDEX(internal) + 0x125 && impl->rasterizer->IsMetalRasterizer()) {
+            impl->rasterizer->SynchronizeMetalGasMaximum();
+        }
+#endif
         return impl->pica.regs.reg_array[index];
     }
     default:
@@ -618,6 +628,14 @@ void GPU::ReleaseRenderer() {
 
 template <class Archive>
 void GPU::serialize(Archive& ar, const u32 file_version) {
+#ifdef ENABLE_METAL
+    // Synchronize before PicaCore serializes the raw CPU register array.
+    if constexpr (!Archive::is_loading::value) {
+        if (impl->rasterizer->IsMetalRasterizer()) {
+            impl->rasterizer->SynchronizeMetalGasMaximum();
+        }
+    }
+#endif
     ar & impl->pica;
 }
 

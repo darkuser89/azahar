@@ -25,13 +25,22 @@ u32 RendererBase::GetResolutionScaleFactor() {
     }
 
     const u32 scale_factor = Settings::values.resolution_factor.GetValue();
+#ifdef ENABLE_METAL
+    return scale_factor != 0 ? scale_factor
+                             : render_window.GetMetalFramebufferLayoutSnapshot().GetScalingRatio();
+#else
     return scale_factor != 0 ? scale_factor
                              : render_window.GetFramebufferLayout().GetScalingRatio();
+#endif
 }
 
 void RendererBase::UpdateCurrentFramebufferLayout(bool is_portrait_mode) {
     const auto update_layout = [is_portrait_mode](Frontend::EmuWindow& window) {
+#ifdef ENABLE_METAL
+        const auto layout = window.GetMetalFramebufferLayoutSnapshot();
+#else
         const Layout::FramebufferLayout& layout = window.GetFramebufferLayout();
+#endif
         window.UpdateCurrentFramebufferLayout(layout.width, layout.height, is_portrait_mode);
     };
     update_layout(render_window);

@@ -144,6 +144,24 @@ CMAKE_DEPENDENT_OPTION(ENABLE_LIBUSB "Enable libusb for GameCube Adapter support
 
 CMAKE_DEPENDENT_OPTION(ENABLE_FFMPEG "Enable features which require FFmpeg to function" ON "ENABLE_QT" OFF)
 
+option(ENABLE_METAL "Build the native Metal 4 renderer for Apple Silicon only" ${APPLE})
+if(ENABLE_METAL)
+    if(NOT APPLE OR IOS OR ANDROID OR ENABLE_LIBRETRO)
+        message(FATAL_ERROR "Native Metal 4 requires the macOS Apple Silicon frontend")
+    endif()
+    if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        message(FATAL_ERROR "Native Metal 4 supports arm64 only; Intel and universal builds are unsupported")
+    endif()
+    if(NOT CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+        message(FATAL_ERROR "Select CMAKE_OSX_ARCHITECTURES=arm64 for native Metal 4")
+    endif()
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Native Metal 4 architecture" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0" CACHE STRING "Native Metal 4 minimum macOS" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0")
+    enable_language(OBJCXX)
+    add_definitions(-DENABLE_METAL)
+endif()
+
 CMAKE_DEPENDENT_OPTION(ENABLE_SOFTWARE_RENDERER "Enables the software renderer" ON "NOT ANDROID" OFF)
 CMAKE_DEPENDENT_OPTION(ENABLE_OPENGL "Enables the OpenGL renderer" ${DEFAULT_ENABLE_OPENGL} "NOT APPLE" OFF)
 # NetBSD doesn't support Vulkan yet, remove this check when it does.
@@ -231,7 +249,7 @@ if (CITRA_USE_PRECOMPILED_HEADERS)
 endif()
 
 # In a linked worktree .git is a file, not a directory; hooks come from the common gitdir.
-if(IS_DIRECTORY ${PROJECT_SOURCE_DIR}/.git AND NOT EXISTS ${PROJECT_SOURCE_DIR}/.git/hooks/pre-commit)
+if(NOT ENABLE_METAL AND IS_DIRECTORY ${PROJECT_SOURCE_DIR}/.git AND NOT EXISTS ${PROJECT_SOURCE_DIR}/.git/hooks/pre-commit)
     message(STATUS "Copying pre-commit hook")
     file(COPY hooks/pre-commit
         DESTINATION ${PROJECT_SOURCE_DIR}/.git/hooks)

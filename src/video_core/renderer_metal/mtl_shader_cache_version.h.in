@@ -1,0 +1,6 @@
+// Copyright 2026 Azahar Emulator Project
+// Licensed under GPLv2 or any later version
+#pragma once
+namespace Metal {
+inline constexpr char ShaderDiskCacheSourceVersion[] = "@METAL4_SHADER_CACHE_SOURCE_VERSION@";
+}

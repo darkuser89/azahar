@@ -7,6 +7,11 @@
 #include <atomic>
 #include <functional>
 #include "common/common_types.h"
+#ifdef ENABLE_METAL
+#include <span>
+#include <stdexcept>
+#include <vector>
+#endif
 
 namespace Pica {
 struct OutputVertex;
@@ -75,6 +80,26 @@ public:
     virtual bool AccelerateDrawBatch([[maybe_unused]] bool is_indexed) {
         return false;
     }
+#ifdef ENABLE_METAL
+    virtual bool IsMetalRasterizer() const { return false; }
+    // Native Metal receives the unprocessed immediate input through its owning PicaCore.
+    virtual bool AccelerateImmediateVertex() { return false; }
+    virtual void ResetMetalPrimitiveStream() {}
+    // Transport raw, ordered Gas FIFO/index/reset writes before PicaCore coalesces them.
+    // State ownership, LUT interpretation and GPU work remain in the Metal backend.
+    virtual void WriteMetalGasRegisters(u32, std::span<const u32>, u32) {
+        throw std::logic_error("Native Metal Gas register transport is unavailable");
+    }
+    virtual void UpdateMetalGasAccumulatorMaximum() {
+        throw std::logic_error("Native Metal Gas maximum update is unavailable");
+    }
+    // Publish deferred native Gas feedback only at CPU-observable boundaries.
+    // Other backends keep their existing register/serialization behavior.
+    virtual void SynchronizeMetalGasMaximum() {}
+    virtual void WriteMetalGSUniforms(u32,u32,u16,u8) { throw std::logic_error("Native Metal GS uniform writes are unavailable"); }
+    virtual std::vector<u8> SaveMetalState() { throw std::logic_error("Native Metal state export is unavailable"); }
+    virtual void LoadMetalState(std::span<const u8>) { throw std::logic_error("Native Metal state import is unavailable"); }
+#endif
 
     virtual void LoadDefaultDiskResources(
         [[maybe_unused]] const std::atomic_bool& stop_loading,

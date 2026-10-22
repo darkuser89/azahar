@@ -14,6 +14,9 @@
 #include "video_core/pica/vertex_loader.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/shader/shader.h"
+#ifdef ENABLE_METAL
+#include <stdexcept>
+#endif
 
 namespace Pica {
 
@@ -131,6 +134,33 @@ void PicaCore::InitializeRegs() {
 void PicaCore::BindRasterizer(VideoCore::RasterizerInterface* rasterizer) {
     this->rasterizer = rasterizer;
 }
+#ifdef ENABLE_METAL
+bool PicaCore::UsesMetalRasterizer() const {
+    return rasterizer && rasterizer->IsMetalRasterizer();
+}
+void PicaCore::RestoreCommandListPointer() {
+    cmd_list.head=reinterpret_cast<const u32*>(memory.GetPhysicalPointer(cmd_list.addr));
+}
+void PicaCore::CopyMetalRasterizerState(std::array<u8,Metal::StateArchiveBytes>& state) {
+    if (!rasterizer) throw std::logic_error("Native PICA state has no bound rasterizer");
+    const auto bytes=rasterizer->SaveMetalState();
+    if (bytes.size()!=state.size()) throw std::logic_error("Native PICA state has an invalid fixed payload size");
+    std::copy(bytes.begin(),bytes.end(),state.begin());
+}
+void PicaCore::NotifyMetalGSUniformWrite(u32 first,u32 count,u16 bool_mask,u8 integer_mask) {
+    if (UsesMetalRasterizer()) rasterizer->WriteMetalGSUniforms(first,count,bool_mask,integer_mask);
+}
+void PicaCore::LoadMetalRasterizerState(const std::vector<u8>& state) {
+    if (!rasterizer) throw std::logic_error("Native PICA state has no bound rasterizer");
+    rasterizer->LoadMetalState(state);
+    RestoreCommandListPointer();
+}
+void PicaCore::RejectUnsupportedMetalState(u32 version) {
+    if (version==0)
+        throw std::runtime_error("This savestate lacks native Metal GPU state; legacy-backend state migration is not yet implemented");
+    throw std::runtime_error("Unsupported native Metal PICA archive version");
+}
+#endif
 
 void PicaCore::SetInterruptHandler(Service::GSP::InterruptHandler& signal_interrupt) {
     this->signal_interrupt = signal_interrupt;
@@ -155,6 +185,15 @@ static consteval std::array<RegImplInfo, RegsInternal::NUM_REGS> BuildRegImplFla
     mark_special(PICA_REG_INDEX(gs.bool_uniforms));
     mark_special(PICA_REG_INDEX(vs.output_mask));
     mark_special(PICA_REG_INDEX(vs.bool_uniforms));
+
+#ifdef ENABLE_METAL
+    // Index, LUT FIFO and accumulation-feedback reset are ordered operations.
+    // They cannot pass through ordinary register-write coalescing.
+    for (u32 id = 0x123; id <= 0x125; ++id) {
+        mark_special(id);
+        mark_batch(id);
+    }
+#endif
 
     // Array based registers
     for (u32 i = 0; i < 2; ++i) {
@@ -392,7 +431,12 @@ void PicaCore::HandleSpecialRegBatch(u32 id, const u32* values, u32 count) {
     case PICA_REG_INDEX(gs.uniform_setup.set_value[5]):
     case PICA_REG_INDEX(gs.uniform_setup.set_value[6]):
     case PICA_REG_INDEX(gs.uniform_setup.set_value[7]): {
+#ifdef ENABLE_METAL
+        const auto range=gs_setup.WriteUniformFloatRegRange(regs.internal.gs, values, count);
+        if (range) NotifyMetalGSUniformWrite(range->first_index,range->count,0,0);
+#else
         gs_setup.WriteUniformFloatRegRange(regs.internal.gs, values, count);
+#endif
         break;
     }
     case PICA_REG_INDEX(gs.program.set_word[0]):
@@ -444,6 +488,9 @@ void PicaCore::HandleSpecialRegBatch(u32 id, const u32* values, u32 count) {
                 const u32 idx = range->first_index + i;
                 gs_setup.uniforms.f[idx] = vs_setup.uniforms.f[idx];
             }
+#ifdef ENABLE_METAL
+            NotifyMetalGSUniformWrite(range->first_index,range->count,0,0);
+#endif
         }
         break;
     }
@@ -591,10 +638,16 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
 
     case PICA_REG_INDEX(pipeline.triangle_topology):
         primitive_assembler.Reconfigure(regs.internal.pipeline.triangle_topology);
+#ifdef ENABLE_METAL
+        if (UsesMetalRasterizer()) rasterizer->ResetMetalPrimitiveStream();
+#endif
         break;
 
     case PICA_REG_INDEX(pipeline.restart_primitive):
         primitive_assembler.Reset();
+#ifdef ENABLE_METAL
+        if (UsesMetalRasterizer()) rasterizer->ResetMetalPrimitiveStream();
+#endif
         break;
 
     case PICA_REG_INDEX(pipeline.vs_default_attributes_setup.index):
@@ -632,6 +685,9 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
 
     case PICA_REG_INDEX(gs.bool_uniforms):
         gs_setup.WriteUniformBoolReg(regs.internal.gs.bool_uniforms.Value());
+#ifdef ENABLE_METAL
+        NotifyMetalGSUniformWrite(0,0,0xffff,0);
+#endif
         break;
 
     case PICA_REG_INDEX(gs.int_uniforms[0]):
@@ -640,6 +696,9 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
     case PICA_REG_INDEX(gs.int_uniforms[3]): {
         const u32 index = (id - PICA_REG_INDEX(gs.int_uniforms[0]));
         gs_setup.WriteUniformIntReg(index, regs.internal.gs.GetIntUniform(index));
+#ifdef ENABLE_METAL
+        NotifyMetalGSUniformWrite(0,0,0,u8(1u<<index));
+#endif
         break;
     }
 
@@ -651,7 +710,12 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
     case PICA_REG_INDEX(gs.uniform_setup.set_value[5]):
     case PICA_REG_INDEX(gs.uniform_setup.set_value[6]):
     case PICA_REG_INDEX(gs.uniform_setup.set_value[7]): {
+#ifdef ENABLE_METAL
+        const auto index=gs_setup.WriteUniformFloatReg(regs.internal.gs, value);
+        if (index) NotifyMetalGSUniformWrite(index.value(),1,0,0);
+#else
         gs_setup.WriteUniformFloatReg(regs.internal.gs, value);
+#endif
         break;
     }
 
@@ -703,6 +767,9 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
         if (!regs.internal.pipeline.gs_unit_exclusive_configuration &&
             regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No) {
             gs_setup.WriteUniformBoolReg(regs.internal.vs.bool_uniforms.Value());
+#ifdef ENABLE_METAL
+            NotifyMetalGSUniformWrite(0,0,0xffff,0);
+#endif
         }
         break;
 
@@ -715,6 +782,9 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
         if (!regs.internal.pipeline.gs_unit_exclusive_configuration &&
             regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No) {
             gs_setup.WriteUniformIntReg(index, regs.internal.vs.GetIntUniform(index));
+#ifdef ENABLE_METAL
+            NotifyMetalGSUniformWrite(0,0,0,u8(1u<<index));
+#endif
         }
         break;
     }
@@ -731,6 +801,9 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
         if (!regs.internal.pipeline.gs_unit_exclusive_configuration &&
             regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No && index) {
             gs_setup.uniforms.f[index.value()] = vs_setup.uniforms.f[index.value()];
+#ifdef ENABLE_METAL
+            NotifyMetalGSUniformWrite(index.value(),1,0,0);
+#endif
         }
         break;
     }
@@ -871,6 +944,14 @@ void PicaCore::WriteInternalRegBatch(u32 id, const u32* values, u32 count, u32 m
         (regs.internal.reg_array[id] & ~write_mask) | (values[count - 1] & write_mask);
     dirty_regs.Set(id);
 
+#ifdef ENABLE_METAL
+    if (id >= 0x123 && id <= 0x125) {
+        if (UsesMetalRasterizer())
+            rasterizer->WriteMetalGasRegisters(id, std::span<const u32>{values, count}, mask);
+        return;
+    }
+#endif
+
     if (reg_impl_flags_lut[id].SupportsBatch()) {
         // If the register supports batch then call the handler.
         HandleSpecialRegBatch(id, values, count);
@@ -955,6 +1036,12 @@ void PicaCore::WriteInternalReg(u32 id, u32 value, u32 mask, bool& stop_requeste
     const u32 write_mask = ExpandBitsToBytes[mask];
     regs.internal.reg_array[id] = (old_value & ~write_mask) | (value & write_mask);
 
+#ifdef ENABLE_METAL
+    if (id >= 0x123 && id <= 0x125 && UsesMetalRasterizer()) {
+        rasterizer->WriteMetalGasRegisters(id, std::span<const u32>{&value, 1}, mask);
+    }
+#endif
+
     if (debug_context) [[unlikely]] {
         // Track register write.
         DebugUtils::OnPicaRegWrite(id, mask, regs.internal.reg_array[id]);
@@ -1007,6 +1094,18 @@ void PicaCore::SubmitImmediate(u32 value) {
 }
 
 void PicaCore::DrawImmediate() {
+#ifdef ENABLE_METAL
+    if (UsesMetalRasterizer()) {
+        if (debug_context) debug_context->OnEvent(DebugContext::Event::VertexShaderInvocation, std::addressof(immediate.input_vertex));
+        if (!rasterizer->AccelerateImmediateVertex()) {
+            throw std::runtime_error("Native Metal did not handle immediate vertex processing");
+        }
+        immediate.current_attribute = 0;
+        immediate.reset_geometry_pipeline = false;
+        if (debug_context) debug_context->OnEvent(DebugContext::Event::FinishedPrimitiveBatch, nullptr);
+        return;
+    }
+#endif
     // Compile the vertex shader.
     shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
 
@@ -1052,6 +1151,16 @@ void PicaCore::DrawArrays(bool is_indexed) {
         debug_context->OnEvent(DebugContext::Event::IncomingPrimitiveBatch, nullptr);
     }
 
+#ifdef ENABLE_METAL
+    if (UsesMetalRasterizer()) {
+        delay_generator.AddVertices(regs.internal.pipeline.num_vertices, regs.internal.pipeline.triangle_topology);
+        if (!rasterizer->AccelerateDrawBatch(is_indexed)) {
+            throw std::runtime_error("Native Metal did not handle vertex batch processing");
+        }
+        if (debug_context) debug_context->OnEvent(DebugContext::Event::FinishedPrimitiveBatch, nullptr);
+        return;
+    }
+#endif
     const bool accelerate_draw = [this] {
         // Geometry shaders cannot be accelerated due to register preservation.
         if (regs.internal.pipeline.use_gs == PipelineRegs::UseGS::Yes) {
@@ -1254,8 +1363,13 @@ void PicaCore::CommandList::serialize(Archive& ar, const u32 file_version) {
     ar & length;
     ar & current_index;
     if (Archive::is_loading::value) {
+#ifdef ENABLE_METAL
+        // The owning PicaCore restores this pointer from its own MemorySystem after load.
+        head=nullptr;
+#else
         const u8* ptr = Core::System::GetInstance().Memory().GetPhysicalPointer(addr);
         head = reinterpret_cast<const u32*>(ptr);
+#endif
     }
 }
 

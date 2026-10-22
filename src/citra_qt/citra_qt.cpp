@@ -636,6 +636,7 @@ void GMainWindow::InitializeWidgets() {
     graphics_api_button = new QPushButton();
     graphics_api_button->setObjectName(QStringLiteral("GraphicsAPIStatusBarButton"));
     graphics_api_button->setFocusPolicy(Qt::NoFocus);
+    graphics_api_button->setToolTip(tr("Click to change the renderer before starting a game."));
     UpdateAPIIndicator();
 
     connect(graphics_api_button, &QPushButton::clicked, this, [this] { UpdateAPIIndicator(true); });
@@ -3909,41 +3910,46 @@ void GMainWindow::UpdateVolumeUI() {
 }
 
 void GMainWindow::UpdateAPIIndicator(bool update) {
-    static std::array graphics_apis = {QStringLiteral("SOFTWARE"), QStringLiteral("OPENGL"),
-                                       QStringLiteral("VULKAN")};
+    static const std::array graphics_apis = {QStringLiteral("SOFTWARE"), QStringLiteral("OPENGL"),
+                                           QStringLiteral("VULKAN"), QStringLiteral("METAL 4")};
 
-    static std::array graphics_api_colors = {QStringLiteral("#3ae400"), QStringLiteral("#00ccdd"),
-                                             QStringLiteral("#91242a")};
+    static const std::array graphics_api_colors = {QStringLiteral("#3ae400"), QStringLiteral("#00ccdd"),
+                                                 QStringLiteral("#91242a"), QStringLiteral("#8b8bff")};
 
-    u32 api_index = static_cast<u32>(Settings::values.graphics_api.GetValue());
+    const auto available = [this](Settings::GraphicsAPI api) {
+        switch (api) {
+#ifdef ENABLE_SOFTWARE_RENDERER
+        case Settings::GraphicsAPI::Software:
+            return true;
+#endif
+#ifdef ENABLE_OPENGL
+        case Settings::GraphicsAPI::OpenGL:
+            return true;
+#endif
+#ifdef ENABLE_VULKAN
+        case Settings::GraphicsAPI::Vulkan:
+            return !physical_devices.empty();
+#endif
+#ifdef ENABLE_METAL
+        case Settings::GraphicsAPI::Metal:
+            return true;
+#endif
+        default:
+            return false;
+        }
+    };
+    u32 api_index = static_cast<u32>(Settings::GetWorkingGraphicsAPI());
     if (update) {
-        api_index = (api_index + 1) % graphics_apis.size();
-        // Skip past any disabled renderers.
-#ifndef ENABLE_SOFTWARE_RENDERER
-        if (api_index == static_cast<u32>(Settings::GraphicsAPI::Software)) {
+        for (std::size_t i = 0; i < graphics_apis.size(); ++i) {
             api_index = (api_index + 1) % graphics_apis.size();
-        }
-#endif
-#ifndef ENABLE_OPENGL
-        if (api_index == static_cast<u32>(Settings::GraphicsAPI::OpenGL)) {
-            api_index = (api_index + 1) % graphics_apis.size();
-        }
-#endif
-#ifndef ENABLE_VULKAN
-        if (api_index == static_cast<u32>(Settings::GraphicsAPI::Vulkan)) {
-            api_index = (api_index + 1) % graphics_apis.size();
-        }
-#else
-        if (physical_devices.empty()) {
-            if (api_index == static_cast<u32>(Settings::GraphicsAPI::Vulkan)) {
-                api_index = (api_index + 1) % graphics_apis.size();
+            if (available(static_cast<Settings::GraphicsAPI>(api_index))) {
+                Settings::values.graphics_api = static_cast<Settings::GraphicsAPI>(api_index);
+                break;
             }
         }
-#endif
-        Settings::values.graphics_api = static_cast<Settings::GraphicsAPI>(api_index);
     }
 
-    const QString style_sheet = QStringLiteral("QPushButton { font-weight: bold; color: %0; }")
+    const QString style_sheet = QStringLiteral("QPushButton { font-weight: bold; color: %1; }")
                                     .arg(graphics_api_colors[api_index]);
 
     graphics_api_button->setText(graphics_apis[api_index]);
